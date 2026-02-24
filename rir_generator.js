@@ -177,9 +177,12 @@ class RIRGenerator {
 
         // 直达声：距离衰减 + 指向性 + HRTF
         const delaySamples = Math.round((dist / this.speedOfSound) * this.fs);
-        let gain = hrtfGain * pattern * (8.0 / (dist * dist + 0.3));
+        // 使用反比平方律
+        const distanceGain = 4.0 / (dist * dist + 0.5);
+        // 不限制最大增益，让ILD效果真正生效
+        let gain = hrtfGain * pattern * distanceGain;
 
-        ir[Math.min(delaySamples, nSamples-1)] = Math.min(1, gain);
+        ir[Math.min(delaySamples, nSamples-1)] = gain;
 
         // 早期反射（简单的）
         const reflections = [0.008, 0.015, 0.025];
@@ -190,22 +193,18 @@ class RIRGenerator {
             }
         }
 
-        // 后期混响 - 纯指数衰减，无振荡
+        // 后期混响 - 纯指数衰减，需要加上距离衰减
         const lateStart = Math.round(0.04 * this.fs);
         const decayRate = -6.9 / this.T60;
+
+        // 混响也要有距离衰减，但比直达声衰减得慢（声波在房间内反射，能量会分散）
+        const reverbDistanceGain = 0.3 / (dist * dist + 0.5);
 
         for (let i = 0; i < nSamples - lateStart; i++) {
             const t = i / this.fs;
             // 纯指数衰减
             const reverb = Math.exp(decayRate * t) * 0.01;
-            ir[lateStart + i] = reverb * this.beta * hrtfGain;
-        }
-
-        // 归一化
-        let max = 0;
-        for (let i = 0; i < nSamples; i++) max = Math.max(max, Math.abs(ir[i]));
-        if (max > 0.9) {
-            for (let i = 0; i < nSamples; i++) ir[i] *= 0.9 / max;
+            ir[lateStart + i] = reverb * this.beta * hrtfGain * reverbDistanceGain;
         }
 
         return ir;
@@ -238,32 +237,50 @@ class RIRGenerator {
         const leftEarDir = headDir;
         const rightEarDir = headDir;
 
-        // 计算声源相对于头中心的方向
+        // 计算声源相对于头部朝向的方向
         const dx = srcPos[0] - micPos[0];
         const dz = srcPos[2] - micPos[2];
         const srcAngle = Math.atan2(dx, dz);
         const faceAngle = dirLen > 0 ? Math.atan2(micDir[0], micDir[2]) : 0;
+        // srcAngle - faceAngle
         let relAngle = (srcAngle - faceAngle) * 180 / Math.PI;
 
         while (relAngle > 180) relAngle -= 360;
         while (relAngle < -180) relAngle += 360;
 
-        // 简化的ILD - 更强的效果
-        // 当声源在右边(relAngle > 0)时，右耳大声；左边时左耳大声
+        // 简化的ILD
+        // 使用绝对值计算，让0-180度平滑过渡
+        // 0度：左右平衡
+        // 90度：ILD最大
+        // 180度：左右平衡（背对声源时声音从前方传来）
         let leftGain = 1.0;
         let rightGain = 1.0;
 
-        if (relAngle > 0) {
-            // 声源在右边 - 右耳大声
-            const factor = Math.min(1, Math.abs(relAngle) / 60);
-            leftGain = 1.0;
-            rightGain = 1.0 + factor * 0.5;  // 右耳增强
-        } else if (relAngle < 0) {
-            // 声源在左边 - 左耳大声
-            const factor = Math.min(1, Math.abs(relAngle) / 60);
-            rightGain = 1.0;
-            leftGain = 1.0 + factor * 0.5;  // 左耳增强
+        const absAngle = Math.abs(relAngle);
+        // 90度时ILD最大，之后逐渐减小
+        const maxILDAngle = 90;
+        const factor = Math.min(1, absAngle / maxILDAngle);
+
+        // 当角度超过90度时，逐渐减少ILD效果
+        let ildStrength = factor;
+        if (absAngle > 90) {
+            ildStrength = factor * (1 - (absAngle - 90) / 90);  // 90-180度逐渐减小到0
         }
+
+        if (relAngle > 0) {
+            // 声源在左边 - 左耳大声，右耳衰减
+            leftGain = 1.0 + ildStrength * 2.0;
+            rightGain = 1.0 / (1.0 + ildStrength * 2.0);
+        } else if (relAngle < 0) {
+            // 声源在右边 - 右耳大声，左耳衰减
+            rightGain = 1.0 + ildStrength * 2.0;
+            leftGain = 1.0 / (1.0 + ildStrength * 2.0);
+        }
+
+        // 不限制最大增益，让差异更大
+        // 混响会自动归一化，所以不用担心削波
+
+        console.log('relAngle:', relAngle.toFixed(1), 'leftGain:', leftGain.toFixed(2), 'rightGain:', rightGain.toFixed(2));
 
         const leftIR = this._generateSingleEarRIR(srcPos, leftPos, leftEarDir, leftGain);
         const rightIR = this._generateSingleEarRIR(srcPos, rightPos, rightEarDir, rightGain);
@@ -272,7 +289,9 @@ class RIRGenerator {
             left: leftIR,
             right: rightIR,
             sampleRate: this.fs,
-            angle: relAngle
+            angle: relAngle,
+            leftGain: leftGain,
+            rightGain: rightGain
         };
     }
 

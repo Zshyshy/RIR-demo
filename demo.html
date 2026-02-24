@@ -1,0 +1,881 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>实时RIR双耳音频模拟</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Arial, sans-serif;
+            background: #0a0a0f;
+            color: #fff;
+            overflow: hidden;
+            height: 100vh;
+        }
+
+        #container {
+            display: flex;
+            height: 100vh;
+        }
+
+        #canvas-container {
+            flex: 1;
+            position: relative;
+        }
+
+        #info-panel {
+            width: 280px;
+            background: linear-gradient(180deg, #1a1a2e 0%, #16213e 100%);
+            padding: 20px;
+            border-left: 1px solid #0f3460;
+            overflow-y: auto;
+        }
+
+        h1 {
+            font-size: 18px;
+            margin-bottom: 20px;
+            color: #e94560;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+        }
+
+        .control-group {
+            margin-bottom: 20px;
+            padding: 15px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 8px;
+        }
+
+        .control-group h3 {
+            font-size: 12px;
+            color: #888;
+            margin-bottom: 10px;
+            text-transform: uppercase;
+        }
+
+        .control-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+
+        .control-row label {
+            font-size: 13px;
+            color: #ccc;
+        }
+
+        .control-row input[type="range"] {
+            width: 120px;
+            accent-color: #e94560;
+        }
+
+        .control-row .value {
+            font-size: 12px;
+            color: #e94560;
+            min-width: 40px;
+            text-align: right;
+        }
+
+        button {
+            width: 100%;
+            padding: 12px;
+            background: #e94560;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: bold;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            transition: all 0.3s;
+            margin-bottom: 10px;
+        }
+
+        button:hover {
+            background: #ff6b6b;
+            transform: translateY(-2px);
+        }
+
+        button:active {
+            transform: translateY(0);
+        }
+
+        .status {
+            padding: 10px;
+            background: rgba(0, 255, 0, 0.1);
+            border-radius: 4px;
+            font-size: 12px;
+            color: #0f0;
+            text-align: center;
+            margin-bottom: 10px;
+        }
+
+        .status.error {
+            background: rgba(255, 0, 0, 0.1);
+            color: #f00;
+        }
+
+        .instructions {
+            font-size: 11px;
+            color: #666;
+            line-height: 1.6;
+            padding: 10px;
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 4px;
+        }
+
+        .instructions kbd {
+            background: #333;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: monospace;
+            color: #e94560;
+        }
+
+        #audio-input {
+            width: 100%;
+            padding: 8px;
+            background: #1a1a2e;
+            border: 1px solid #333;
+            color: #fff;
+            border-radius: 4px;
+            margin-bottom: 10px;
+        }
+
+        .position-info {
+            font-size: 11px;
+            color: #888;
+            padding: 10px;
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 4px;
+            margin-top: 10px;
+        }
+
+        .position-info div {
+            margin-bottom: 4px;
+        }
+
+        .position-info span {
+            color: #e94560;
+        }
+    </style>
+</head>
+<body>
+    <div id="container">
+        <div id="canvas-container"></div>
+        <div id="info-panel">
+            <h1>空间音频模拟</h1>
+
+            <div id="status" class="status">等待加载音频...</div>
+
+            <div class="control-group">
+                <h3>音频文件 (MP3)</h3>
+                <input type="file" id="audio-input" accept="audio/mp3,audio/mpeg,audio/*">
+            </div>
+
+            <div class="control-group">
+                <h3>房间参数</h3>
+                <div class="control-row">
+                    <label>房间大小</label>
+                    <input type="range" id="room-size" min="3" max="100" value="5" step="0.5">
+                    <span class="value" id="room-size-val">5m</span>
+                </div>
+                <div class="control-row">
+                    <label>混响时间 T60</label>
+                    <input type="range" id="t60" min="0.1" max="2" value="0.5" step="0.1">
+                    <span class="value" id="t60-val">0.5s</span>
+                </div>
+                <div class="control-row">
+                    <label>吸声系数</label>
+                    <input type="range" id="absorption" min="0.1" max="1" value="0.5" step="0.1">
+                    <span class="value" id="absorption-val">0.5</span>
+                </div>
+            </div>
+
+            <div class="control-group">
+                <h3>移动速度</h3>
+                <div class="control-row">
+                    <label>WASD速度</label>
+                    <input type="range" id="move-speed" min="0.01" max="0.5" value="0.1" step="0.01">
+                    <span class="value" id="move-speed-val">0.10</span>
+                </div>
+            </div>
+
+            <button id="play-btn">播放 / 暂停</button>
+
+            <div class="instructions">
+                <p><kbd>鼠标拖动</kbd> 旋转视角</p>
+                <p><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> 移动位置</p>
+            </div>
+
+            <div class="position-info">
+                <div>声源位置: <span id="src-pos">-</span></div>
+                <div>当前位置: <span id="mic-pos">-</span></div>
+                <div>朝向: <span id="mic-dir">[0, 0, 1]</span></div>
+                <div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid #333;">
+                    <div>左耳增益: <span id="left-gain" style="color: #4fc3f7;">1.00</span></div>
+                    <div>右耳增益: <span id="right-gain" style="color: #ff8a65;">1.00</span></div>
+                    <div>相对角度: <span id="rel-angle">0°</span></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 引入Three.js -->
+    <script src="https://cdn.jsdelivr.net/npm/three@0.158.0/build/three.min.js"></script>
+    <!-- 引入RIR生成器 -->
+    <script src="rir_generator.js"></script>
+
+    <script>
+        // ==================== 全局变量 ====================
+        let scene, camera, renderer;
+        let sourceMesh;
+        let audioContext, sourceNode, convolverLeft, convolverRight;
+        let audioBuffer = null;
+        let isPlaying = false;
+        let animationId = null;
+
+        // 位置和方向（第一人称）
+        const state = {
+            srcPos: null,      // 声源位置，init时设置
+            micPos: null,      // 当前位置，init时设置
+            micDir: [0, 0, 1],            // 朝向
+            roomSize: 5,
+            T60: 0.5,
+            absorption: 0.5,
+            earDistance: 0.17,
+            moveSpeed: 0.1,
+            lookSpeed: 0.005,
+            yaw: 0,
+            pitch: 0
+        };
+
+        // 键状态
+        const keys = { w: false, a: false, s: false, d: false };
+        let isDragging = false;
+        let lastMouseX = 0, lastMouseY = 0;
+
+        // RIR生成器
+        let rirGenerator;
+
+        // ==================== 初始化 ====================
+        function init() {
+            // 根据房间大小初始化位置（声源和麦克风在房间相对位置）
+            const halfRoom = state.roomSize / 2;
+            state.srcPos = [halfRoom, halfRoom * 0.8, halfRoom];
+            state.micPos = [halfRoom, 1.7, halfRoom * 0.4];
+
+            initThreeJS();
+            initRIRGenerator();
+            initAudio();
+            initEventListeners();
+            updateDisplay();
+            animate();
+        }
+
+        // ==================== Three.js 场景（第一人称）===================
+        function initThreeJS() {
+            const container = document.getElementById('canvas-container');
+
+            // 场景
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x000000);
+
+            // 相机（第一人称视角）
+            camera = new THREE.PerspectiveCamera(75, container.clientWidth / container.clientHeight, 0.01, 100);
+            updateCamera();
+
+            // 渲染器
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(container.clientWidth, container.clientHeight);
+            renderer.setPixelRatio(window.devicePixelRatio);
+            container.appendChild(renderer.domElement);
+
+            // 非常微弱的环境光
+            const ambientLight = new THREE.AmbientLight(0x222222, 0.3);
+            scene.add(ambientLight);
+
+            // 房间（蓝色墙壁长方体）
+            createRoom();
+
+            // 声源（红色发光小球）
+            createSource();
+        }
+
+        function createRoom() {
+            // 移除旧房间
+            if (window.roomMesh) {
+                scene.remove(window.roomMesh);
+            }
+            if (window.roomEdges) {
+                scene.remove(window.roomEdges);
+            }
+
+            const size = state.roomSize;
+            // 房间是一个长方体，中心在 (size/2, size/2, size/2)
+            const geometry = new THREE.BoxGeometry(size, size, size);
+
+            // 蓝色墙壁材质，透明度低一些
+            const material = new THREE.MeshBasicMaterial({
+                color: 0x1a5fb4,      // 蓝色
+                transparent: true,
+                opacity: 0.15,
+                side: THREE.BackSide   // 渲染内表面
+            });
+
+            window.roomMesh = new THREE.Mesh(geometry, material);
+            window.roomMesh.position.set(size/2, size/2, size/2);
+            scene.add(window.roomMesh);
+
+            // 边缘线框，加深色
+            const edgesGeometry = new THREE.EdgesGeometry(geometry);
+            const edgesMaterial = new THREE.LineBasicMaterial({
+                color: 0x0a3d7a,    // 深蓝色
+                linewidth: 2
+            });
+            window.roomEdges = new THREE.LineSegments(edgesGeometry, edgesMaterial);
+            window.roomEdges.position.set(size/2, size/2, size/2);
+            scene.add(window.roomEdges);
+        }
+
+        function createSource() {
+            // 声源 - 红色发光小球
+            const geometry = new THREE.SphereGeometry(0.08, 16, 16);
+            const material = new THREE.MeshBasicMaterial({ color: 0xff3333 });
+            sourceMesh = new THREE.Mesh(geometry, material);
+            sourceMesh.position.set(...state.srcPos);
+
+            // 添加发光效果
+            const glowGeometry = new THREE.SphereGeometry(0.12, 16, 16);
+            const glowMaterial = new THREE.MeshBasicMaterial({
+                color: 0xff3333,
+                transparent: true,
+                opacity: 0.4
+            });
+            const glow = new THREE.Mesh(glowGeometry, glowMaterial);
+            sourceMesh.add(glow);
+
+            scene.add(sourceMesh);
+        }
+
+        function updateCamera() {
+            // 相机绑定到当前位置
+            camera.position.set(...state.micPos);
+
+            // 设置相机朝向
+            const lookDir = new THREE.Vector3(...state.micDir).normalize();
+            const target = camera.position.clone().add(lookDir);
+            camera.lookAt(target);
+        }
+
+        // ==================== 音频系统 ====================
+        // 交叉淡入淡出：两套卷积器轮流工作
+        let convolverA_left, convolverA_right;
+        let convolverB_left, convolverB_right;
+        // 每路需要左右两个增益节点
+        let gainA_left, gainA_right;
+        let gainB_left, gainB_right;
+        // 后置增益：用于ILD效果
+        let ildGainLeft, ildGainRight;
+        let activeConvolver = 'A';  // 当前活跃的卷积器
+
+        function initAudio() {
+            audioContext = new (window.AudioContext || window.webkitAudioContext)();
+
+            // 创建两套卷积器（左右声道各两个）
+            convolverA_left = audioContext.createConvolver();
+            convolverA_right = audioContext.createConvolver();
+            convolverB_left = audioContext.createConvolver();
+            convolverB_right = audioContext.createConvolver();
+
+            // 创建淡入淡出增益节点（左右分开）
+            gainA_left = audioContext.createGain();
+            gainA_right = audioContext.createGain();
+            gainB_left = audioContext.createGain();
+            gainB_right = audioContext.createGain();
+
+            // 创建ILD后置增益（用于控制左右音量差）
+            ildGainLeft = audioContext.createGain();
+            ildGainRight = audioContext.createGain();
+            ildGainLeft.gain.value = 1.0;
+            ildGainRight.gain.value = 1.0;
+
+            // 初始增益
+            gainA_left.gain.value = 1.0;
+            gainA_right.gain.value = 1.0;
+            gainB_left.gain.value = 0.0;
+            gainB_right.gain.value = 0.0;
+
+            // 初始化短的无声buffer
+            const silentBuffer = createSilentBuffer();
+
+            convolverA_left.buffer = silentBuffer;
+            convolverA_right.buffer = silentBuffer;
+            convolverB_left.buffer = silentBuffer;
+            convolverB_right.buffer = silentBuffer;
+
+            // 连接：卷积器 -> 独立增益 -> 直接输出
+            // A路：左右分开
+            convolverA_left.connect(gainA_left);
+            convolverA_right.connect(gainA_right);
+            // B路：左右分开
+            convolverB_left.connect(gainB_left);
+            convolverB_right.connect(gainB_right);
+
+            // 直接输出：左增益->ILD增益->左声道，右增益->ILD增益->右声道
+            // 使用一个 2 通道 merger 来正确分配左右
+            const merger = audioContext.createChannelMerger(2);
+
+            // 重要：ChannelMerger 的第0输入=左输出，第1输入=右输出
+            // 连接：淡入淡出增益 -> ILD增益 -> merger
+            gainA_left.connect(ildGainLeft);
+            gainA_right.connect(ildGainRight);
+            gainB_left.connect(ildGainLeft);
+            gainB_right.connect(ildGainRight);
+
+            ildGainLeft.connect(merger, 0, 0);    // 左 -> merger左
+            ildGainRight.connect(merger, 0, 1);    // 右 -> merger右
+            merger.connect(audioContext.destination);
+
+            // 同时创建干信号输出
+            const dryGain = audioContext.createGain();
+            dryGain.gain.value = 0.0;
+            dryGain.connect(audioContext.destination);
+            window.dryGain = dryGain;
+
+            updateStatus('音频系统已就绪，请加载音频文件', false);
+        }
+
+        // 创建静音buffer的辅助函数
+        function createSilentBuffer(duration = 0.01) {
+            const samples = Math.round(audioContext.sampleRate * duration);
+            const buffer = audioContext.createBuffer(1, Math.max(samples, 1), audioContext.sampleRate);
+            buffer.getChannelData(0).fill(0);
+            return buffer;
+        }
+
+        function initRIRGenerator() {
+            const sampleRate = audioContext ? audioContext.sampleRate : 44100;
+            rirGenerator = new RIRGenerator({
+                fs: sampleRate,
+                roomSize: [state.roomSize, state.roomSize, state.roomSize],
+                absorption: state.absorption,
+                T60: state.T60
+            });
+        }
+
+        // RIR更新节流 - 基于位置/朝向变化
+        let lastRIRPos = null;
+        let lastRIRDir = null;
+        const RIR_UPDATE_THRESHOLD = 0.3; // 位置变化超过0.3米才更新
+
+        function shouldUpdateRIR() {
+            if (!lastRIRPos) return true;
+
+            // 计算位置变化
+            const dx = state.micPos[0] - lastRIRPos[0];
+            const dy = state.micPos[1] - lastRIRPos[1];
+            const dz = state.micPos[2] - lastRIRPos[2];
+            const distChange = Math.sqrt(dx*dx + dy*dy + dz*dz);
+
+            // 计算朝向变化
+            const ddx = state.micDir[0] - lastRIRDir[0];
+            const ddz = state.micDir[2] - lastRIRDir[2];
+            const dirChange = Math.sqrt(ddx*ddx + ddz*ddz);
+
+            return distChange > RIR_UPDATE_THRESHOLD || dirChange > 0.05;
+        }
+
+        // 交叉淡入淡出切换RIR
+        let isSwitching = false;
+        const CROSSFADE_TIME = 0.08; // 80ms淡入淡出
+
+        function updateRIR() {
+            if (!rirGenerator || !audioBuffer) return;
+
+            // 正在切换中，跳过这次更新
+            if (isSwitching) return;
+
+            // 检查是否需要更新
+            if (!shouldUpdateRIR()) return;
+
+            // 记录当前位置
+            lastRIRPos = [...state.micPos];
+            lastRIRDir = [...state.micDir];
+
+            // 更新RIR参数
+            rirGenerator.setRoom(
+                [state.roomSize, state.roomSize, state.roomSize],
+                state.absorption,
+                state.T60
+            );
+
+            // 生成新的RIR
+            const rir = rirGenerator.generateBinauralRIR(
+                state.srcPos,
+                state.micPos,
+                state.micDir,
+                state.earDistance
+            );
+
+            // 更新UI显示增益和ILD后置增益
+            if (rir.leftGain !== undefined) {
+                document.getElementById('left-gain').textContent = rir.leftGain.toFixed(2);
+                document.getElementById('right-gain').textContent = rir.rightGain.toFixed(2);
+                document.getElementById('rel-angle').textContent = rir.angle.toFixed(1) + '°';
+
+                // 应用ILD后置增益（使用平滑过渡）
+                const now = audioContext.currentTime;
+                // 归一化增益，使总音量不会太大
+                const maxGain = Math.max(rir.leftGain, rir.rightGain);
+                const normLeft = rir.leftGain / maxGain;
+                const normRight = rir.rightGain / maxGain;
+
+                ildGainLeft.gain.linearRampToValueAtTime(normLeft, now + 0.05);
+                ildGainRight.gain.linearRampToValueAtTime(normRight, now + 0.05);
+            }
+
+            // 创建AudioBuffer
+            const ctxRate = audioContext.sampleRate;
+            const leftBuffer = audioContext.createBuffer(1, rir.left.length, ctxRate);
+            leftBuffer.getChannelData(0).set(rir.left);
+
+            const rightBuffer = audioContext.createBuffer(1, rir.right.length, ctxRate);
+            rightBuffer.getChannelData(0).set(rir.right);
+
+            // 交叉淡入淡出切换
+            switchRIRWithCrossfade(leftBuffer, rightBuffer);
+        }
+
+        // 交叉淡入淡出切换函数
+        function switchRIRWithCrossfade(leftBuffer, rightBuffer) {
+            isSwitching = true;
+            const now = audioContext.currentTime;
+
+            if (activeConvolver === 'A') {
+                // 当前A活跃，预加载到B
+                convolverB_left.buffer = leftBuffer;
+                convolverB_right.buffer = rightBuffer;
+
+                // 淡出A路，淡入B路（左右分开）
+                gainA_left.gain.linearRampToValueAtTime(0, now + CROSSFADE_TIME);
+                gainA_right.gain.linearRampToValueAtTime(0, now + CROSSFADE_TIME);
+                gainB_left.gain.linearRampToValueAtTime(1, now + CROSSFADE_TIME);
+                gainB_right.gain.linearRampToValueAtTime(1, now + CROSSFADE_TIME);
+
+                // 切换活跃卷积器
+                activeConvolver = 'B';
+
+                // 淡入淡出完成后重置A
+                setTimeout(() => {
+                    gainA_left.gain.value = 1.0;
+                    gainA_right.gain.value = 1.0;
+                    convolverA_left.buffer = createSilentBuffer();
+                    convolverA_right.buffer = createSilentBuffer();
+                    isSwitching = false;
+                }, CROSSFADE_TIME * 1000 + 50);
+            } else {
+                // 当前B活跃，预加载到A
+                convolverA_left.buffer = leftBuffer;
+                convolverA_right.buffer = rightBuffer;
+
+                // 淡出B路，淡入A路（左右分开）
+                gainB_left.gain.linearRampToValueAtTime(0, now + CROSSFADE_TIME);
+                gainB_right.gain.linearRampToValueAtTime(0, now + CROSSFADE_TIME);
+                gainA_left.gain.linearRampToValueAtTime(1, now + CROSSFADE_TIME);
+                gainA_right.gain.linearRampToValueAtTime(1, now + CROSSFADE_TIME);
+
+                // 切换活跃卷积器
+                activeConvolver = 'A';
+
+                // 淡入淡出完成后重置B
+                setTimeout(() => {
+                    gainB_left.gain.value = 0.0;
+                    gainB_right.gain.value = 0.0;
+                    convolverB_left.buffer = createSilentBuffer();
+                    convolverB_right.buffer = createSilentBuffer();
+                    isSwitching = false;
+                }, CROSSFADE_TIME * 1000 + 50);
+            }
+        }
+
+        async function loadAudio(file) {
+            try {
+                updateStatus('加载音频中...', false);
+
+                const arrayBuffer = await file.arrayBuffer();
+                audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+
+                updateStatus('音频加载成功，点击播放', false);
+            } catch (error) {
+                updateStatus('音频加载失败: ' + error.message, true);
+            }
+        }
+
+        function playAudio() {
+            if (!audioBuffer) {
+                updateStatus('请先加载音频文件', true);
+                return;
+            }
+
+            if (audioContext.state === 'suspended') {
+                audioContext.resume();
+            }
+
+            // 停止之前的播放
+            if (sourceNode && isPlaying) {
+                try {
+                    sourceNode.stop();
+                } catch(e) {}
+                sourceNode.disconnect();
+                sourceNode = null;
+            }
+
+            // 重置增益节点（确保从干净状态开始）
+            gainA_left.gain.value = 1.0;
+            gainA_right.gain.value = 1.0;
+            gainB_left.gain.value = 0.0;
+            gainB_right.gain.value = 0.0;
+            activeConvolver = 'A';
+
+            // 创建新的音频源
+            sourceNode = audioContext.createBufferSource();
+            sourceNode.buffer = audioBuffer;
+            sourceNode.loop = true;
+
+            // 更新RIR
+            updateRIR();
+
+            // 连接：源 -> 两路卷积器（通过交叉淡入淡出）
+            sourceNode.connect(convolverA_left);
+            sourceNode.connect(convolverA_right);
+            sourceNode.connect(convolverB_left);
+            sourceNode.connect(convolverB_right);
+            sourceNode.connect(window.dryGain);
+
+            sourceNode.start();
+            isPlaying = true;
+
+            updateStatus('播放中 - 移动鼠标或使用WASD', false);
+        }
+
+        function stopAudio() {
+            if (sourceNode) {
+                try {
+                    sourceNode.stop();
+                } catch(e) {}
+                sourceNode.disconnect();
+                sourceNode = null;
+            }
+            isPlaying = false;
+            updateStatus('已暂停', false);
+        }
+
+        // ==================== 交互控制 ====================
+        function initEventListeners() {
+            const canvas = renderer.domElement;
+
+            // 鼠标拖动旋转（第一人称视角）
+            canvas.addEventListener('mousedown', (e) => {
+                isDragging = true;
+                lastMouseX = e.clientX;
+                lastMouseY = e.clientY;
+            });
+
+            canvas.addEventListener('mousemove', (e) => {
+                if (!isDragging) return;
+
+                const deltaX = e.clientX - lastMouseX;
+                const deltaY = e.clientY - lastMouseY;
+
+                state.yaw -= deltaX * state.lookSpeed;
+                state.pitch -= deltaY * state.lookSpeed;
+
+                // 限制俯仰角
+                state.pitch = Math.max(-Math.PI / 2 + 0.1, Math.min(Math.PI / 2 - 0.1, state.pitch));
+
+                // 更新朝向
+                state.micDir = [
+                    Math.sin(state.yaw) * Math.cos(state.pitch),
+                    Math.sin(state.pitch),
+                    Math.cos(state.yaw) * Math.cos(state.pitch)
+                ];
+
+                updateCamera();
+                if (isPlaying) updateRIR();
+                updateDisplay();
+
+                lastMouseX = e.clientX;
+                lastMouseY = e.clientY;
+            });
+
+            canvas.addEventListener('mouseup', () => isDragging = false);
+            canvas.addEventListener('mouseleave', () => isDragging = false);
+
+            // 键盘控制
+            window.addEventListener('keydown', (e) => {
+                const key = e.key.toLowerCase();
+                if (keys.hasOwnProperty(key)) {
+                    keys[key] = true;
+                    e.preventDefault();
+                }
+            });
+
+            window.addEventListener('keyup', (e) => {
+                const key = e.key.toLowerCase();
+                if (keys.hasOwnProperty(key)) {
+                    keys[key] = false;
+                }
+            });
+
+            // UI控制
+            document.getElementById('play-btn').addEventListener('click', () => {
+                if (isPlaying) {
+                    stopAudio();
+                } else {
+                    playAudio();
+                }
+            });
+
+            document.getElementById('audio-input').addEventListener('change', (e) => {
+                if (e.target.files.length > 0) {
+                    loadAudio(e.target.files[0]);
+                }
+            });
+
+            // 房间参数控制
+            document.getElementById('room-size').addEventListener('input', (e) => {
+                state.roomSize = parseFloat(e.target.value);
+                document.getElementById('room-size-val').textContent = state.roomSize + 'm';
+                createRoom();
+                if (isPlaying) updateRIR();
+            });
+
+            document.getElementById('t60').addEventListener('input', (e) => {
+                state.T60 = parseFloat(e.target.value);
+                document.getElementById('t60-val').textContent = state.T60 + 's';
+                if (isPlaying) updateRIR();
+            });
+
+            document.getElementById('absorption').addEventListener('input', (e) => {
+                state.absorption = parseFloat(e.target.value);
+                document.getElementById('absorption-val').textContent = state.absorption;
+                if (isPlaying) updateRIR();
+            });
+
+            // 移动速度控制
+            document.getElementById('move-speed').addEventListener('input', (e) => {
+                state.moveSpeed = parseFloat(e.target.value);
+                document.getElementById('move-speed-val').textContent = state.moveSpeed.toFixed(2);
+            });
+
+            // 窗口大小调整
+            window.addEventListener('resize', () => {
+                const container = document.getElementById('canvas-container');
+                camera.aspect = container.clientWidth / container.clientHeight;
+                camera.updateProjectionMatrix();
+                renderer.setSize(container.clientWidth, container.clientHeight);
+            });
+        }
+
+        // ==================== 动画循环 ====================
+        function animate() {
+            animationId = requestAnimationFrame(animate);
+
+            // 处理键盘移动
+            handleKeyboardMovement();
+
+            renderer.render(scene, camera);
+        }
+
+        function handleKeyboardMovement() {
+            if (!keys.w && !keys.a && !keys.s && !keys.d) return;
+
+            // 计算前向和右向向量（基于当前朝向）
+            const forward = [
+                Math.sin(state.yaw),
+                0,
+                Math.cos(state.yaw)
+            ];
+            // 右边方向
+            const right = [
+                -Math.cos(state.yaw),
+                0,
+                Math.sin(state.yaw)
+            ];
+            // 左边方向
+            const left = [
+                Math.cos(state.yaw),
+                0,
+                -Math.sin(state.yaw)
+            ];
+
+            const speed = state.moveSpeed;
+            let moved = false;
+
+            if (keys.w) {
+                state.micPos[0] += forward[0] * speed;
+                state.micPos[2] += forward[2] * speed;
+                moved = true;
+            }
+            if (keys.s) {
+                state.micPos[0] -= forward[0] * speed;
+                state.micPos[2] -= forward[2] * speed;
+                moved = true;
+            }
+            if (keys.a) {
+                // A往左
+                state.micPos[0] += left[0] * speed;
+                state.micPos[2] += left[2] * speed;
+                moved = true;
+            }
+            if (keys.d) {
+                // D往右
+                state.micPos[0] += right[0] * speed;
+                state.micPos[2] += right[2] * speed;
+                moved = true;
+            }
+
+            if (!moved) return;
+
+            // 限制在房间内
+            const margin = 0.3;
+            const halfRoom = state.roomSize / 2;
+            state.micPos[0] = Math.max(margin, Math.min(state.roomSize - margin, state.micPos[0]));
+            state.micPos[1] = Math.max(margin, Math.min(state.roomSize - margin, state.micPos[1]));
+            state.micPos[2] = Math.max(margin, Math.min(state.roomSize - margin, state.micPos[2]));
+
+            updateCamera();
+            if (isPlaying) updateRIR();
+            updateDisplay();
+        }
+
+        // ==================== 辅助函数 ====================
+        function updateStatus(message, isError) {
+            const status = document.getElementById('status');
+            status.textContent = message;
+            status.className = 'status' + (isError ? ' error' : '');
+        }
+
+        function updateDisplay() {
+            document.getElementById('src-pos').textContent =
+                '[' + state.srcPos.map(v => v.toFixed(1)).join(', ') + ']';
+            document.getElementById('mic-pos').textContent =
+                '[' + state.micPos.map(v => v.toFixed(1)).join(', ') + ']';
+            document.getElementById('mic-dir').textContent =
+                '[' + state.micDir.map(v => v.toFixed(2)).join(', ') + ']';
+        }
+
+        // 启动
+        init();
+    </script>
+</body>
+</html>
