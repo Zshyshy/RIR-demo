@@ -269,12 +269,13 @@ class RIRGenerator {
 
         if (relAngle > 0) {
             // 声源在左边 - 左耳大声，右耳衰减
-            leftGain = 1.0 + ildStrength * 2.0;
-            rightGain = 1.0 / (1.0 + ildStrength * 2.0);
+            // 科学ILD：90度约4-6dB (1.5-2倍振幅比)
+            leftGain = 1.0 + ildStrength * 0.4;
+            rightGain = 1.0 / (1.0 + ildStrength * 0.4);
         } else if (relAngle < 0) {
             // 声源在右边 - 右耳大声，左耳衰减
-            rightGain = 1.0 + ildStrength * 2.0;
-            leftGain = 1.0 / (1.0 + ildStrength * 2.0);
+            rightGain = 1.0 + ildStrength * 0.4;
+            leftGain = 1.0 / (1.0 + ildStrength * 0.4);
         }
 
         // 不限制最大增益，让差异更大
